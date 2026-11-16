@@ -1,5 +1,11 @@
 # @tiptap/y-tiptap
 
+## 3.3.1
+
+### Patch Changes
+
+- 89ae1c9: Make typing in large collaborative documents faster by skipping unchanged content that comes before the edit.
+
 ## 3.3.0
 
 ### Minor Changes
