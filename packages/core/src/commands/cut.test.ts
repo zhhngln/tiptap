@@ -26,6 +26,29 @@ describe('cut command', () => {
     editor.destroy()
   })
 
+  it('keeps the selection inside a textblock when cutting to target 0', () => {
+    const editor = createEditor()
+
+    editor.commands.cut({ from: 7, to: 12 }, 0)
+
+    expect(editor.getHTML()).toBe('<p>world</p><p>Hello </p>')
+    expect(editor.state.selection.from).toBe(1)
+    expect(editor.state.selection.$from.parent.isTextblock).toBe(true)
+
+    editor.destroy()
+  })
+
+  it('keeps the selection inside a textblock when cutting to target 1', () => {
+    const editor = createEditor()
+
+    editor.commands.cut({ from: 7, to: 12 }, 1)
+
+    expect(editor.state.selection.from).toBe(1)
+    expect(editor.state.selection.$from.parent.isTextblock).toBe(true)
+
+    editor.destroy()
+  })
+
   it('cuts content to end of document', () => {
     const editor = createEditor()
 
