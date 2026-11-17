@@ -1,6 +1,8 @@
 import { Extension } from '@tiptap/core'
 import type { Node as PMNode } from '@tiptap/pm/model'
+import type { PluginSpec } from '@tiptap/pm/state'
 import { Plugin } from '@tiptap/pm/state'
+import type { EditorView } from '@tiptap/pm/view'
 
 import { characterCountPluginKey } from './characterCountPluginKey.js'
 import { hasCharacterLimit } from './hasCharacterLimit.js'
@@ -138,9 +140,68 @@ export const CharacterCount = Extension.create<CharacterCountOptions, CharacterC
   },
 
   addProseMirrorPlugins() {
+    let compositionEnded = false
+    let compositionTimer: ReturnType<typeof setTimeout> | undefined
+
+    const isComposing = () => this.editor.view.composing || compositionEnded
+
+    const cancelCompositionEnd = () => {
+      compositionEnded = false
+      clearTimeout(compositionTimer)
+    }
+
+    const trimAfterComposition = (view: EditorView) => {
+      compositionEnded = false
+      if (view.isDestroyed || view.composing) {
+        return
+      }
+
+      const { state } = view
+      const limit = characterCountPluginKey.getState(state)?.limit
+      if (!hasCharacterLimit(limit)) {
+        return
+      }
+
+      const over = this.storage.characters({ node: state.doc }) - limit
+      if (over > 0) {
+        const pos = state.selection.$head.pos
+        view.dispatch(state.tr.deleteRange(Math.max(0, pos - over), pos))
+      }
+    }
+
+    const skipWhileComposing =
+      (
+        filter: NonNullable<PluginSpec['filterTransaction']>,
+      ): NonNullable<PluginSpec['filterTransaction']> =>
+      (transaction, state) =>
+        isComposing() || filter(transaction, state)
+
     return [
       new Plugin({
         key: characterCountPluginKey,
+        view: () => ({ destroy: cancelCompositionEnd }),
+        props: {
+          handleDOMEvents: {
+            compositionstart: () => {
+              cancelCompositionEnd()
+              return false
+            },
+            compositionend: view => {
+              compositionEnded = true
+
+              // Queue after ProseMirror's composition-end flush timer.
+              queueMicrotask(() => {
+                if (view.isDestroyed || !compositionEnded) {
+                  return
+                }
+
+                compositionTimer = setTimeout(() => trimAfterComposition(view), 20)
+              })
+
+              return false
+            },
+          },
+        },
         state: {
           init: () => ({ limit: this.options.limit, initialized: false }),
           apply: (tr, previous) => {
@@ -152,7 +213,7 @@ export const CharacterCount = Extension.create<CharacterCountOptions, CharacterC
           },
         },
         appendTransaction: (transactions, oldState, newState) => {
-          if (characterCountPluginKey.getState(oldState)?.initialized) {
+          if (isComposing() || characterCountPluginKey.getState(oldState)?.initialized) {
             return
           }
 
@@ -181,7 +242,7 @@ export const CharacterCount = Extension.create<CharacterCountOptions, CharacterC
             return tr
           }
         },
-        filterTransaction: (transaction, state) => {
+        filterTransaction: skipWhileComposing((transaction, state) => {
           const update = transaction.getMeta(characterCountPluginKey)
           const limit =
             update === undefined ? characterCountPluginKey.getState(state)?.limit : update.limit
@@ -237,7 +298,7 @@ export const CharacterCount = Extension.create<CharacterCountOptions, CharacterC
           }
 
           return true
-        },
+        }),
       }),
     ]
   },
